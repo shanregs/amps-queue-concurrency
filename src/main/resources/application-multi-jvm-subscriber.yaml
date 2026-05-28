@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/ampsdb
+    username: ${DB_USER:amps_user}
+    password: ${DB_PASSWORD:changeme}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: HikariPool-MultiJvm
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+      keepalive-time: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+amps:
+  consumer:
+    subscriber-count: 3
+    max-concurrency-per-subscriber: 50
+    bookmark-dir: ${user.home}/.amps

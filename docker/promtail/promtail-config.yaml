@@ -1,0 +1,58 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+
+  # ── Docker container logs ─────────────────────────────────────────────────
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["logging=promtail"]
+
+    relabel_configs:
+      # Container name → label
+      - source_labels: [__meta_docker_container_name]
+        target_label: container
+        regex: '/?(.*)'
+
+      # Docker Compose service name → label
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+
+      # Extract profile from env var label set in compose
+      - source_labels: [__meta_docker_container_label_spring_profile]
+        target_label: spring_profile
+
+    pipeline_stages:
+      # Parse JSON log lines (produced by LogstashEncoder in docker-logging profile)
+      - json:
+          expressions:
+            level:          level
+            message:        message
+            logger:         logger
+            messageId:      messageId
+            topic:          topic
+            subscriberIndex: subscriberIndex
+            publisherWorker: publisherWorker
+            timestamp:      "@timestamp"
+
+      # Promote extracted fields to Loki labels (keep cardinality low)
+      - labels:
+          level:
+          service:
+          spring_profile:
+
+      # Use the JSON timestamp as the log line timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano

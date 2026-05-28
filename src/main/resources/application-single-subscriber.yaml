@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/amps-single;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+    hikari:
+      pool-name: HikariPool-SingleSub
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+      idle-timeout: 600000
+
+amps:
+  client:
+    name: amps-queue-concurrency-sub-1
+  consumer:
+    max-concurrency: 100

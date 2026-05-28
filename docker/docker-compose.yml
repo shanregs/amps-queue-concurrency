@@ -1,0 +1,226 @@
+##############################################################################
+# AMPS Queue Concurrency — Full Docker Stack
+#
+# Services:
+#   amps          — AMPS message server  (port 9004 client, 8085 admin)
+#   postgres      — Shared DB for multi-JVM profile (port 5432)
+#   app-publisher — Spring Boot: message-publisher profile (port 8082)
+#   app-single    — Spring Boot: single-subscriber profile (port 8080)
+#   app-multi     — Spring Boot: multi-subscriber profile (port 8081)
+#   prometheus    — Metrics scraper (port 9090)
+#   grafana       — Dashboards (port 3000)
+#   loki          — Log aggregation (port 3100)
+#   promtail      — Log shipper (reads Docker logs → Loki)
+#
+# Quick start:
+#   docker compose -f docker/docker-compose.yml up amps postgres prometheus grafana loki promtail
+#   docker compose -f docker/docker-compose.yml up app-publisher app-single
+#
+# Build app image first:
+#   docker compose -f docker/docker-compose.yml build app-single
+##############################################################################
+
+name: amps-queue-concurrency
+
+x-app-common: &app-common
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  depends_on:
+    amps:
+      condition: service_healthy
+  environment:
+    AMPS_SERVER_URI: tcp://amps:9004/amps/json
+    SPRING_PROFILES_ACTIVE: "docker-logging"   # overridden per service below
+  labels:
+    logging: "promtail"
+  restart: unless-stopped
+
+services:
+
+  # ── AMPS Server ─────────────────────────────────────────────────────────────
+  amps:
+    image: 60east/amps:latest
+    container_name: amps-server
+    ports:
+      - "9004:9004"    # Client connections (amps:// protocol)
+      - "8085:8085"    # Admin HTTP UI
+    volumes:
+      - ./amps/config.xml:/etc/amps/config.xml:ro
+      - amps-sow:/amps/sow
+      - amps-logs:/amps/logs
+    command: ["/etc/amps/config.xml"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9004"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── PostgreSQL (multi-JVM profile) ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: amps-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB:       ampsdb
+      POSTGRES_USER:     amps_user
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amps_user -d ampsdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── App: Publisher ───────────────────────────────────────────────────────────
+  app-publisher:
+    <<: *app-common
+    container_name: amps-publisher
+    ports:
+      - "8082:8080"
+    environment:
+      AMPS_SERVER_URI: tcp://amps:9004/amps/json
+      SPRING_PROFILES_ACTIVE: "message-publisher,docker-logging"
+      AMPS_PUBLISHER_MESSAGES_PER_SECOND: "500"
+      AMPS_PUBLISHER_MODE: "RATE_LIMITED"
+      AMPS_PUBLISHER_CONCURRENT_PUBLISHERS: "5"
+    labels:
+      logging: "promtail"
+      spring_profile: "message-publisher"
+
+  # ── App: Single Subscriber ───────────────────────────────────────────────────
+  app-single:
+    <<: *app-common
+    container_name: amps-single-subscriber
+    ports:
+      - "8080:8080"
+    environment:
+      AMPS_SERVER_URI: tcp://amps:9004/amps/json
+      SPRING_PROFILES_ACTIVE: "single-subscriber,docker-logging"
+      AMPS_CONSUMER_MAX_CONCURRENCY: "100"
+    volumes:
+      - bookmark-single:/home/amps/.amps/bookmarks
+    labels:
+      logging: "promtail"
+      spring_profile: "single-subscriber"
+
+  # ── App: Multi Subscriber ────────────────────────────────────────────────────
+  app-multi:
+    <<: *app-common
+    container_name: amps-multi-subscriber
+    ports:
+      - "8081:8080"
+    environment:
+      AMPS_SERVER_URI: tcp://amps:9004/amps/json
+      SPRING_PROFILES_ACTIVE: "multi-subscriber,docker-logging"
+      AMPS_CONSUMER_SUBSCRIBER_COUNT: "3"
+      AMPS_CONSUMER_MAX_CONCURRENCY_PER_SUBSCRIBER: "50"
+    volumes:
+      - bookmark-multi:/home/amps/.amps/bookmarks
+    labels:
+      logging: "promtail"
+      spring_profile: "multi-subscriber"
+
+  # ── App: Multi-JVM Subscriber (uses PostgreSQL) ──────────────────────────────
+  app-multi-jvm:
+    <<: *app-common
+    container_name: amps-multi-jvm-subscriber
+    ports:
+      - "8083:8080"
+    depends_on:
+      amps:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      AMPS_SERVER_URI:    tcp://amps:9004/amps/json
+      SPRING_PROFILES_ACTIVE: "multi-jvm-subscriber,docker-logging"
+      DB_HOST:            postgres
+      DB_USER:            amps_user
+      DB_PASSWORD:        changeme
+      AMPS_CONSUMER_SUBSCRIBER_COUNT: "3"
+      AMPS_CONSUMER_MAX_CONCURRENCY_PER_SUBSCRIBER: "50"
+    volumes:
+      - bookmark-multi-jvm:/home/amps/.amps/bookmarks
+    labels:
+      logging: "promtail"
+      spring_profile: "multi-jvm-subscriber"
+
+  # ── Prometheus ───────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: amps-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+
+  # ── Grafana ──────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: amps-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_AUTH_ANONYMOUS_ENABLED:  "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  # ── Loki ─────────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:2.9.5
+    container_name: amps-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/tmp/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  # ── Promtail ─────────────────────────────────────────────────────────────────
+  promtail:
+    image: grafana/promtail:2.9.5
+    container_name: amps-promtail
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  amps-sow:
+  amps-logs:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  bookmark-single:
+  bookmark-multi:
+  bookmark-multi-jvm:

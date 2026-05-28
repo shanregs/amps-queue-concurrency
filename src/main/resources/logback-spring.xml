@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--
+        Two appender modes:
+          docker  — JSON output (parsed by Promtail → Loki)
+          default — human-readable pattern for local development
+        Activate docker mode:  spring.profiles.active=...,docker-logging
+        OR set env:            LOGGING_FORMAT=json
+    -->
+
+    <!-- ── Human-readable (dev default) ─────────────────────────────────── -->
+    <appender name="CONSOLE_PLAIN" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) [%15.15t] %cyan(%-40.40logger{39}) : %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ── Structured JSON (Docker / Loki) ──────────────────────────────── -->
+    <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- MDC fields promoted to top-level JSON fields for easy Loki label extraction -->
+            <includeMdcKeyName>messageId</includeMdcKeyName>
+            <includeMdcKeyName>topic</includeMdcKeyName>
+            <includeMdcKeyName>subscriberIndex</includeMdcKeyName>
+            <includeMdcKeyName>publisherWorker</includeMdcKeyName>
+            <!-- Static labels on every log line -->
+            <customFields>{"service":"amps-queue-concurrency"}</customFields>
+            <fieldNames>
+                <timestamp>@timestamp</timestamp>
+                <message>message</message>
+                <logger>logger</logger>
+                <thread>thread</thread>
+                <level>level</level>
+                <levelValue>[ignore]</levelValue>
+            </fieldNames>
+            <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                <maxDepthPerCause>20</maxDepthPerCause>
+                <shortenedClassNameLength>20</shortenedClassNameLength>
+            </throwableConverter>
+        </encoder>
+    </appender>
+
+    <!-- ── Profile-driven selection ─────────────────────────────────────── -->
+    <springProfile name="docker-logging">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE_JSON"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!docker-logging">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE_PLAIN"/>
+        </root>
+    </springProfile>
+
+    <!-- ── Per-package tuning ────────────────────────────────────────────── -->
+    <logger name="com.shan.mq.amps" level="DEBUG" additivity="false">
+        <springProfile name="docker-logging">
+            <appender-ref ref="CONSOLE_JSON"/>
+        </springProfile>
+        <springProfile name="!docker-logging">
+            <appender-ref ref="CONSOLE_PLAIN"/>
+        </springProfile>
+    </logger>
+
+    <logger name="org.hibernate.SQL"              level="WARN"/>
+    <logger name="com.zaxxer.hikari"              level="WARN"/>
+    <logger name="org.springframework.web"        level="WARN"/>
+    <logger name="org.springframework.boot"       level="INFO"/>
+
+</configuration>

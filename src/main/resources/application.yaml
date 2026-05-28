@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: amps-queue-concurrency
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+amps:
+  server:
+    uri: tcp://localhost:9004/amps/json
+  queue:
+    topic: /queue/trades
+    filter: ""
+    lease-timeout-ms: 5000
+  consumer:
+    max-retries: 3
+    shutdown-timeout-ms: 30000

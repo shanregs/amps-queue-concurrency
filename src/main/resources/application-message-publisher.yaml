@@ -1,0 +1,37 @@
+spring:
+  # Publisher needs minimal JPA so model beans still load cleanly.
+  # H2 is created but never used for message storage.
+  datasource:
+    url: jdbc:h2:mem:publisher-unused;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+    hikari:
+      pool-name: HikariPool-Publisher
+      maximum-pool-size: 2
+      minimum-idle: 1
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+amps:
+  publisher:
+    topic: /queue/trades
+    mode: RATE_LIMITED
+    messages-per-second: 500
+    total-messages: 0
+    concurrent-publishers: 5
+    payload-template: TRADE
+    custom-payload-template: ""
+    symbols:
+      - AAPL
+      - MSFT
+      - GOOGL
+      - AMZN
+      - TSLA
+      - META
+      - NVDA
+      - JPM
+    rate-replenish-interval-ms: 100
+    log-progress-every: 1000

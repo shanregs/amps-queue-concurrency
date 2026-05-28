@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AMPS Server Configuration
+  ─────────────────────────
+  Reference: https://docs.60east.com/amps/user-guide/
+
+  This config sets up:
+    • TCP listener on port 9004  (AMPS client protocol / JSON)
+    • Admin HTTP listener on port 8085
+    • Queue topic  /queue/trades  (competing consumers, JSON)
+    • Queue topic  /queue/orders  (optional second topic)
+    • SOW store for queue persistence
+    • Basic statistics logging
+-->
+<AMPSConfig>
+
+  <Name>amps-docker</Name>
+
+  <!-- ── Logging ─────────────────────────────────────────────────────────── -->
+  <Logging>
+    <Target>
+      <Protocol>file</Protocol>
+      <FileName>/amps/logs/amps.log</FileName>
+    </Target>
+  </Logging>
+
+  <!-- ── Statistics ────────────────────────────────────────────────────────── -->
+  <StatisticsLogging>
+    <Class>amps_stats_logger.so</Class>
+    <DefaultInterval>10s</DefaultInterval>
+    <FileName>/amps/logs/amps-stats.log</FileName>
+  </StatisticsLogging>
+
+  <!-- ── Transports ─────────────────────────────────────────────────────── -->
+  <Transports>
+
+    <!-- Primary AMPS client transport: amps://host:9004/amps/json -->
+    <Transport>
+      <Name>tcp-main</Name>
+      <Type>tcp</Type>
+      <InetAddr>0.0.0.0:9004</InetAddr>
+      <Protocol>amps</Protocol>
+      <MessageType>json</MessageType>
+    </Transport>
+
+    <!-- Admin / monitoring HTTP: http://host:8085/amps/admin -->
+    <Transport>
+      <Name>admin</Name>
+      <Type>tcp</Type>
+      <InetAddr>0.0.0.0:8085</InetAddr>
+      <Protocol>amps-admin</Protocol>
+    </Transport>
+
+  </Transports>
+
+  <!-- ── Modules ────────────────────────────────────────────────────────── -->
+  <Modules>
+    <!-- Queue module — required for /queue/* topics -->
+    <Module>
+      <Name>queue</Name>
+      <Class>queue.so</Class>
+    </Module>
+  </Modules>
+
+  <!-- ── SOW (State-of-the-World) / Queue Persistence ─────────────────── -->
+  <SOW>
+
+    <!-- Primary trade queue — each message delivered to ONE subscriber -->
+    <Topic>
+      <Topic>/queue/trades</Topic>
+      <MessageType>json</MessageType>
+      <Type>queue</Type>
+      <Key>/id</Key>
+      <Persistence>
+        <Journal>
+          <Path>/amps/sow/queue_trades</Path>
+          <JournalSize>256mb</JournalSize>
+          <LogSize>64mb</LogSize>
+        </Journal>
+      </Persistence>
+    </Topic>
+
+    <!-- Optional: order queue for multi-topic simulations -->
+    <Topic>
+      <Topic>/queue/orders</Topic>
+      <MessageType>json</MessageType>
+      <Type>queue</Type>
+      <Key>/id</Key>
+      <Persistence>
+        <Journal>
+          <Path>/amps/sow/queue_orders</Path>
+          <JournalSize>128mb</JournalSize>
+          <LogSize>32mb</LogSize>
+        </Journal>
+      </Persistence>
+    </Topic>
+
+  </SOW>
+
+  <!-- ── Authentication (disabled for dev/demo) ────────────────────────── -->
+  <!-- Uncomment to enable:
+  <Authentication>
+    <Module>
+      <Name>file-auth</Name>
+      <Class>file_authenticator.so</Class>
+      <Options>
+        <PasswordFile>/amps/etc/passwords.cfg</PasswordFile>
+      </Options>
+    </Module>
+  </Authentication>
+  -->
+
+</AMPSConfig>

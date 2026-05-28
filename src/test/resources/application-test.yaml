@@ -1,0 +1,42 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+    hikari:
+      pool-name: HikariPool-Test
+      maximum-pool-size: 5
+      minimum-idle: 1
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+amps:
+  server:
+    uri: tcp://localhost:19004/amps/json
+  queue:
+    topic: /queue/test-trades
+    filter: ""
+    lease-timeout-ms: 5000
+  client:
+    name: amps-test-subscriber
+  consumer:
+    max-concurrency: 10
+    subscriber-count: 2
+    max-concurrency-per-subscriber: 5
+    max-retries: 3
+    shutdown-timeout-ms: 5000
+  publisher:
+    topic: /queue/test-trades
+    mode: FIXED_COUNT
+    messages-per-second: 100
+    total-messages: 10
+    concurrent-publishers: 2
+    payload-template: TRADE
+    custom-payload-template: ""
+    symbols:
+      - AAPL
+      - MSFT
+    rate-replenish-interval-ms: 100
+    log-progress-every: 5

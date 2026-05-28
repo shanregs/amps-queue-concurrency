@@ -1,0 +1,37 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: docker-dev
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+
+  # ── Spring Boot Actuator (all app instances) ──────────────────────────────
+  - job_name: 'amps-queue-app'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - 'app-single:8080'
+          - 'app-multi:8080'
+          - 'app-publisher:8082'
+        labels:
+          application: 'amps-queue-concurrency'
+
+  # ── AMPS Admin (if prometheus exporter is enabled) ────────────────────────
+  # AMPS does not expose Prometheus natively; metrics come via Spring Actuator.
+  # Uncomment if you add a custom AMPS → Prometheus bridge.
+  # - job_name: 'amps-server'
+  #   static_configs:
+  #     - targets: ['amps:8085']
+
+  # ── Prometheus self-scrape ────────────────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
