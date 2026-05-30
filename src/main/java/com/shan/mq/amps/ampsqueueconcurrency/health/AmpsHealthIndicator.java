@@ -1,5 +1,6 @@
 package com.shan.mq.amps.ampsqueueconcurrency.health;
 
+import com.crankuptheamps.client.ConnectionInfo;
 import com.crankuptheamps.client.HAClient;
 import com.shan.mq.amps.ampsqueueconcurrency.model.SubscriberContext;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,24 @@ public class AmpsHealthIndicator implements HealthIndicator {
 
     private Health probe(HAClient client, String mode) {
         try {
+
+            ConnectionInfo connectionInfo = client.getConnectionInfo();
+            log.info("AMPS health probe mode={} uri={} version={}", mode, connectionInfo.get("client.uri"), client.getServerVersion());
+            return Health.up()
+                    .withDetail("mode", mode)
+                    .withDetail("serverVersion", client.getServerVersion())
+                    .build();
+
+        } catch (Exception e) {
+
+            log.warn("AMPS health probe failed mode={} error={}", mode, e.getMessage());
+
+            return Health.down(e)
+                    .withDetail("mode", mode)
+                    .withDetail("reason", "AMPS connection unavailable")
+                    .build();
+        }
+/*        try {
             boolean connected = client.isConnected();
             if (connected) {
                 return Health.up()
@@ -69,6 +88,6 @@ public class AmpsHealthIndicator implements HealthIndicator {
             return Health.down(e)
                     .withDetail("mode", mode)
                     .build();
-        }
+        }*/
     }
 }

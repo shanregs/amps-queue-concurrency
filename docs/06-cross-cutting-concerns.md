@@ -62,8 +62,31 @@ Re-delivery after discard                DISCARDED row  Return DISCARD → ACK (
 
 There is no DLQ in this environment. Failed messages must be:
 1. Retried a configurable number of times (AMPS re-delivers naturally via lease expiry)
-2. Discarded after `maxRetries` exhausted (ACK sent, message removed from AMPS queue,
-   severe log emitted, metric counter incremented)
+2. Discarded after `max-retries` exhausted — ACK sent, message removed from AMPS queue,
+   ERROR log emitted, metric counter incremented, next message processed
+
+### Retry Tracking Modes
+
+Two modes are available via `retry-db-tracking-enabled`:
+
+```text
+Mode A — DB tracking (retry-db-tracking-enabled: true, default)
+  FAILED rows are written to the database on each failed attempt.
+  Retry count and last error are persisted and survive JVM restarts.
+  Correct for all profiles, including multi-jvm-subscriber.
+
+Mode B — In-memory tracking (retry-db-tracking-enabled: false)
+  No FAILED rows are written to DB.
+  Retry count is tracked in a ConcurrentHashMap inside the JVM.
+  PROCESSED rows are still written on success (idempotency intact).
+  Counter is lost on JVM restart → retries reset to zero.
+  Suitable for single-subscriber and multi-subscriber (same JVM).
+  NOT suitable for multi-jvm-subscriber.
+
+In both modes:
+  - Retries exhausted → log ERROR + return DISCARD → caller ACKs → next message
+  - In-flight failure (retries remaining) → return FAIL → no ACK → AMPS re-delivers
+```
 
 ### Retry Flow
 
@@ -76,33 +99,63 @@ First attempt fails:
   AMPS re-delivers to the next available subscriber connection
 
 On re-delivery (attempt 2, 3, ...):
-  MessageProcessor checks repo.findByMessageId(messageId)
-  found: status=FAILED, retryCount=1 (or 2, ...)
-      retryCount < maxRetries → attempt processing again
-      retryCount >= maxRetries → mark DISCARDED, return DISCARD signal
+
+  DB tracking mode:
+    MessageProcessor checks repo.findByMessageId(messageId)
+    found: status=FAILED, retryCount=N
+        retryCount < maxRetries → attempt processing again
+        retryCount >= maxRetries → mark DISCARDED, return DISCARD signal
+
+  In-memory tracking mode:
+    MessageProcessor checks repo.findByMessageId(messageId) for idempotency only
+    (FAILED rows are never written, so re-delivery finds no existing record)
+    inMemoryRetryCount.get(messageId) → attempt N
+        attempt < maxRetries → return FAIL (no DB write)
+        attempt >= maxRetries → remove from map, return DISCARD (no DB write)
 
   Caller receives DISCARD → calls haClient.ack(msg) → removes from AMPS queue
-  Logs: SEVERE "Message {messageId} discarded after {maxRetries} attempts: {lastError}"
+  Logs: ERROR "DISCARD messageId={} after {} attempts — moving to next message"
   Metric: amps.messages.discarded counter++
 ```
 
-### ProcessedMessage Retry State
+### ProcessedMessage State (DB Tracking Mode)
 
 ```text
 Columns involved in retry:
 
-  status        VARCHAR(20)   PROCESSED | FAILED | DISCARDED
-  retry_count   INT DEFAULT 0  incremented on each failed attempt
-  last_error    TEXT           last exception message (for debugging)
-  last_attempt_at TIMESTAMP   when the last attempt (success or fail) occurred
+  status          VARCHAR(20)   PROCESSED | FAILED | DISCARDED
+  retry_count     INT DEFAULT 0  incremented on each failed attempt
+  last_error      TEXT           last exception message (for debugging)
+  last_attempt_at TIMESTAMP     when the last attempt (success or failure) occurred
 
 State transitions:
-  (new)         → FAILED     (retry_count=1)    on first failure
-  FAILED(1)     → FAILED     (retry_count=2)    on second failure
-  FAILED(n)     → FAILED     (retry_count=n+1)  if n+1 < maxRetries
-  FAILED(max-1) → DISCARDED  (retry_count=max)  on final failure
+  (new)         → FAILED     (retry_count=1)     on first failure
+  FAILED(1)     → FAILED     (retry_count=2)     on second failure
+  FAILED(n)     → FAILED     (retry_count=n+1)   if n+1 < maxRetries
+  FAILED(max-1) → DISCARDED  (retry_count=max)   on final failure
   FAILED(any)   → PROCESSED  (retry_count stays) on eventual success
-  DISCARDED     → DISCARDED  (no change)         re-delivery after discard
+  DISCARDED     → DISCARDED  (no change)          re-delivery after discard
+```
+
+### ProcessedMessage State (In-Memory Tracking Mode)
+
+```text
+Only PROCESSED rows are written to DB.
+FAILED and DISCARDED states exist only in the JVM's inMemoryRetryCount map.
+
+  inMemoryRetryCount map:
+    key   = messageId (AMPS bookmark)
+    value = number of failed attempts so far
+
+  Map entry lifecycle:
+    (new) → map[messageId]=1          on first failure
+    map[id]=N → map[id]=N+1           on each subsequent failure
+    map[id]=maxRetries → removed      on discard (DISCARD returned)
+    map[id]=N → removed               on success (OK returned)
+
+  DB state:
+    No row written on FAIL or DISCARD.
+    PROCESSED row written on success (idempotency).
 ```
 
 ### Configuration
@@ -110,9 +163,12 @@ State transitions:
 ```yaml
 amps:
   consumer:
-    max-retries: 3          # After 3 failures, message is discarded (ACK'd)
-                            # Set to 0 to discard immediately on first failure
-                            # Set to -1 for infinite retries (use with caution)
+    max-retries: 3                    # total failed attempts before discard
+                                      # 1 = discard after first failure (no retries)
+                                      # 3 = discard after third failure (2 retries after first)
+    retry-db-tracking-enabled: true   # true  → persist FAILED/DISCARDED rows to DB
+                                      # false → in-memory retry tracking only (no FAILED rows)
+                                      # must be true for multi-jvm-subscriber
 ```
 
 ### Why Natural Retry via AMPS Lease Expiry Is Correct

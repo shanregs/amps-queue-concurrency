@@ -10,14 +10,15 @@ COPY pom.xml .
 RUN ./mvnw dependency:go-offline -q
 
 COPY src src
-RUN ./mvnw clean package -DskipTests -q
+RUN ./mvnw clean package -Dmaven.test.skip=true -q
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-# Non-root user
-RUN addgroup -S amps && adduser -S amps -G amps
+# Non-root user + writable data dir for H2 file DB
+RUN addgroup -S amps && adduser -S amps -G amps && \
+    mkdir -p /app/data && chown amps:amps /app/data
 USER amps
 
 COPY --from=build /workspace/target/amps-queue-concurrency-*.jar app.jar

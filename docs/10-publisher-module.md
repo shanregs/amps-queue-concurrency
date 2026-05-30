@@ -413,7 +413,7 @@ spring:
 
 amps:
   server:
-    uri: tcp://localhost:9004/amps/json
+    uri: tcp://172.21.12.69:9004/amps/json
 
   publisher:
     topic: /queue/trades             # must match subscriber topic

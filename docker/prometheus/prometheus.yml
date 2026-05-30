@@ -14,13 +14,16 @@ rule_files: []
 scrape_configs:
 
   # ── Spring Boot Actuator (all app instances) ──────────────────────────────
+  # Targets use container-internal port 8080, not the host-mapped ports.
+  # Host mappings (8080/8081/8082/8083) are for external access only.
   - job_name: 'amps-queue-app'
     metrics_path: '/actuator/prometheus'
     static_configs:
       - targets:
           - 'app-single:8080'
           - 'app-multi:8080'
-          - 'app-publisher:8082'
+          - 'app-publisher:8080'
+          - 'app-multi-jvm:8080'
         labels:
           application: 'amps-queue-concurrency'
 

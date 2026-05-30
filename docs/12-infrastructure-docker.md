@@ -62,15 +62,15 @@ Compose bring-up, and Grafana/Loki observability.
 │                                                                                  │
 │  ┌──────────────────┐   tcp:9004    ┌───────────────────────────────────────┐   │
 │  │   AMPS Server    │◀─────────────▶│  Spring Boot: message-publisher       │   │
-│  │  (60east/amps)   │               │  Profile: message-publisher            │   │
-│  │                  │               │  Port: 8082                            │   │
-│  │  Queue topics:   │               │  Publishes N msg/s via HAClient        │   │
-│  │  /queue/trades   │               └───────────────────────────────────────┘   │
-│  │  /queue/orders   │                                                            │
-│  │                  │   tcp:9004    ┌───────────────────────────────────────┐   │
-│  │  Admin:  8085    │◀─────────────▶│  Spring Boot: single-subscriber       │   │
-│  └──────────────────┘               │  Profile: single-subscriber            │   │
-│                                     │  Port: 8080                            │   │
+│  │  (external)      │               │  Profile: message-publisher            │   │
+│  │  172.21.12.69    │               │  Port: 8082                            │   │
+│  │                  │               │  Publishes N msg/s via HAClient        │   │
+│  │  Queue topics:   │               └───────────────────────────────────────┘   │
+│  │  /queue/trades   │                                                            │
+│  │  /queue/orders   │   tcp:9004    ┌───────────────────────────────────────┐   │
+│  │                  │◀─────────────▶│  Spring Boot: single-subscriber       │   │
+│  │  Admin:  8085    │               │  Profile: single-subscriber            │   │
+│  └──────────────────┘               │  Port: 8084                            │   │
 │                                     │  1 HAClient, Semaphore(100), VTs       │   │
 │                                     └───────────────────────┬───────────────┘   │
 │                                                             │ writes             │
@@ -97,10 +97,10 @@ Compose bring-up, and Grafana/Loki observability.
 **Container inventory:**
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
-| `amps` | `60east/amps:latest` | 9004, 8085 | AMPS message broker |
-| `postgres` | `postgres:16-alpine` | 5432 | Shared DB (multi-JVM profile) |
+| *(external)* | AMPS at `172.21.12.69` | 9004 (client), 8085 (admin) | AMPS message broker — not containerised |
+| `postgres` | `postgres:16-alpine` | host:5433→5432 | Shared DB (multi-JVM profile) |
 | `app-publisher` | `./Dockerfile` | 8082 | Publishes simulated messages |
-| `app-single` | `./Dockerfile` | 8080 | Single-subscriber consumer |
+| `app-single` | `./Dockerfile` | 8084 | Single-subscriber consumer |
 | `app-multi` | `./Dockerfile` | 8081 | Multi-subscriber consumer |
 | `app-multi-jvm` | `./Dockerfile` | 8083 | Multi-JVM consumer (PostgreSQL) |
 | `prometheus` | `prom/prometheus:v2.51.0` | 9090 | Metrics collection |
@@ -193,24 +193,29 @@ PostgreSQL UNIQUE(message_id) ensures no double-processing across JVMs.
 
 ## 5. AMPS Server Setup
 
-### 5.1 Obtaining the AMPS Docker image
+### 5.1 External AMPS server
 
-AMPS is a proprietary server from [60East Technologies](https://60east.com).
+AMPS runs externally at `172.21.12.69`. All Docker app containers connect directly
+to that IP — no AMPS container is started by this Compose stack.
+
+| Endpoint | Address |
+|---|---|
+| Client TCP (HAClient) | `tcp://172.21.12.69:9004/amps/json` |
+| Admin HTTP UI | `http://172.21.12.69:8085/amps/admin` |
+
+To switch to a different AMPS host, set the `AMPS_SERVER_URI` environment variable
+when starting the stack, or update `amps.server.uri` in `application.yaml`:
 
 ```bash
-# The community/evaluation image:
-docker pull 60east/amps:latest
-
-# Verify version
-docker run --rm 60east/amps:latest --version
+AMPS_SERVER_URI=tcp://other-host:9004/amps/json \
+  docker compose -f docker/docker-compose.yml up -d app-publisher app-multi-jvm
 ```
 
-> **License note:** AMPS requires a valid licence for production use.
-> Register at https://60east.com/get-started to obtain an evaluation licence.
-> Place the `licence.lic` file in `docker/amps/` and mount it:
-> ```yaml
-> volumes:
->   - ./amps/licence.lic:/etc/amps/licence.lic:ro
+> **Note — Dockerised AMPS:** `docker/amps/Dockerfile` and `docker/amps/config.xml`
+> are kept for reference should you need to run AMPS in Docker. Build with:
+> ```bash
+> docker login   # 60East Docker Hub credentials required
+> docker compose -f docker/docker-compose.yml build amps
 > ```
 
 ### 5.2 AMPS configuration file (`docker/amps/config.xml`)
@@ -228,24 +233,24 @@ Key sections:
 
 ```bash
 # Health check — TCP connect on port 9004
-nc -zv localhost 9004
+nc -zv 172.21.12.69 9004
 
 # Admin REST API
-curl http://localhost:8085/amps/admin
+curl http://172.21.12.69:8085/amps/admin
 
 # List active clients
-curl http://localhost:8085/amps/admin/clients | python -m json.tool
+curl http://172.21.12.69:8085/amps/admin/clients | python -m json.tool
 
 # List topic statistics
-curl http://localhost:8085/amps/admin/topics | python -m json.tool
+curl http://172.21.12.69:8085/amps/admin/topics | python -m json.tool
 
 # Queue depth for /queue/trades
-curl "http://localhost:8085/amps/admin/topics?topic=/queue/trades"
+curl "http://172.21.12.69:8085/amps/admin/topics?topic=/queue/trades"
 ```
 
 ### 5.4 AMPS Admin UI — monitoring queue operations
 
-Open `http://localhost:8085/amps/admin` in a browser.
+Open `http://172.21.12.69:8085/amps/admin` in a browser.
 
 **Key metrics to watch:**
 
@@ -262,16 +267,17 @@ Open `http://localhost:8085/amps/admin` in a browser.
 ### 5.5 AMPS `amps-cmd` CLI (optional)
 
 ```bash
-# If amps-cmd is available inside the container:
-docker exec amps-server amps-cmd --server tcp://localhost:9004 topic-stats /queue/trades
+# If amps-cmd is installed locally or accessible on the AMPS host:
+amps-cmd --server tcp://172.21.12.69:9004 topic-stats /queue/trades
 
 # Subscribe to watch live messages (diagnostic)
-docker exec amps-server amps-cmd --server tcp://localhost:9004 subscribe /queue/trades
+amps-cmd --server tcp://172.21.12.69:9004 subscribe /queue/trades
 ```
 
 ### 5.6 Queue configuration tuning
 
-Edit `docker/amps/config.xml` to adjust:
+The running AMPS server at `172.21.12.69` is configured independently.
+`docker/amps/config.xml` documents the recommended settings for reference:
 
 ```xml
 <!-- Lease timeout: how long AMPS holds a message for one subscriber before re-delivery -->
@@ -342,48 +348,34 @@ SELECT COUNT(*) FROM processed_messages WHERE status = 'FAILED';
 ### 7.2 Build the application image
 
 ```bash
-# From project root — install AMPS JAR first
-mvn install:install-file \
-  -Dfile=/path/to/amps-client-5.3.4.0.jar \
-  -DgroupId=com.crankuptheamps \
-  -DartifactId=amps-client \
-  -Dversion=5.3.4.0 \
-  -Dpackaging=jar \
-  -DgeneratePom=true
-
-# Build Docker image
-docker compose -f docker/docker-compose.yml build
+# From project root — AMPS JAR must be installed in local Maven repo
+docker compose -f docker/docker-compose.yml build app-publisher app-multi-jvm
 ```
 
-### 7.3 Start the infrastructure only
+### 7.3 Start the infrastructure only (postgres + monitoring)
+
+```bash
+# AMPS is external — only postgres and the observability stack need to start
+docker compose -f docker/docker-compose.yml up -d \
+  postgres prometheus grafana loki promtail
+```
+
+### 7.4 Start a simulation (publisher + multi-JVM subscriber)
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d \
-  amps postgres prometheus grafana loki promtail
-
-# Wait for AMPS to be healthy
-docker compose -f docker/docker-compose.yml ps amps
-```
-
-### 7.4 Start a simulation (publisher + single subscriber)
-
-```bash
-docker compose -f docker/docker-compose.yml up -d \
-  amps app-publisher app-single prometheus grafana loki promtail
+  postgres prometheus grafana loki promtail \
+  app-publisher app-multi-jvm
 
 # Watch logs
-docker compose -f docker/docker-compose.yml logs -f app-publisher app-single
+docker compose -f docker/docker-compose.yml logs -f app-publisher app-multi-jvm
 ```
 
-### 7.5 Start multi-JVM scenario (with PostgreSQL)
+### 7.5 Scale multi-JVM subscriber horizontally
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d \
-  amps postgres app-publisher app-multi-jvm prometheus grafana loki promtail
-
-# Scale to multiple JVM instances
-docker compose -f docker/docker-compose.yml up -d \
-  --scale app-multi-jvm=3
+# Start additional subscriber JVMs (all share the same PostgreSQL)
+docker compose -f docker/docker-compose.yml up -d --scale app-multi-jvm=3
 ```
 
 ### 7.6 Common commands
@@ -393,20 +385,20 @@ docker compose -f docker/docker-compose.yml up -d \
 docker compose -f docker/docker-compose.yml ps
 
 # Tail logs for a service
-docker compose -f docker/docker-compose.yml logs -f app-single
+docker compose -f docker/docker-compose.yml logs -f app-multi-jvm
 
 # Stop everything, keep volumes
 docker compose -f docker/docker-compose.yml down
 
-# Stop and wipe all data
+# Stop and wipe all data (including postgres)
 docker compose -f docker/docker-compose.yml down -v
 
-# Restart just the app after a code change
-docker compose -f docker/docker-compose.yml build app-single
-docker compose -f docker/docker-compose.yml up -d app-single
+# Rebuild and restart the app after a code change
+docker compose -f docker/docker-compose.yml build app-multi-jvm
+docker compose -f docker/docker-compose.yml up -d app-multi-jvm
 
-# Check AMPS queue depth from inside the network
-docker exec amps-server nc -z localhost 9004 && echo "AMPS up"
+# Verify AMPS is reachable from your machine
+curl -s http://172.21.12.69:8085/amps/admin | head -5
 ```
 
 ### 7.7 Environment variable overrides

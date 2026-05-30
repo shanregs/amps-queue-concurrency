@@ -44,7 +44,7 @@ scrape_configs:
             topic:          topic
             subscriberIndex: subscriberIndex
             publisherWorker: publisherWorker
-            timestamp:      "@timestamp"
+            timestamp:      '"@timestamp"'
 
       # Promote extracted fields to Loki labels (keep cardinality low)
       - labels:

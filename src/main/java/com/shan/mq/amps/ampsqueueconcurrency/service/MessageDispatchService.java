@@ -45,7 +45,8 @@ public class MessageDispatchService {
                 ProcessingResult result = processor.process(message);
 
                 if (result != ProcessingResult.FAIL) {
-                    haClient.ack(message);
+//                    haClient.ack(message);
+                    message.ack();
                     log.debug("ACK result={} messageId={}", result, messageId);
                 }
                 // FAIL → no ACK → lease expires → AMPS re-delivers

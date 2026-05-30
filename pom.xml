@@ -22,7 +22,11 @@
     </properties>
 
     <dependencies>
-
+        <!-- Jackson Java Time support -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
         <!-- ===== Spring Boot core ===== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -88,43 +92,17 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- ===== Test ===== -->
-        <!--
-            spring-boot-starter-test already includes:
-              JUnit 5, Mockito, AssertJ, Awaitility, Spring Test, JSONAssert
-        -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
 
-        <!--
-            ═══════════════════════════════════════════════════════════════════
-            AMPS Java Client — proprietary JAR (60East Technologies).
-
-            This JAR is NOT available in Maven Central. Install it into your
-            local Maven repo (or firm Nexus/Artifactory) before building:
-
-              mvn install:install-file \
-                -Dfile=/path/to/amps-client-5.3.4.0.jar \
-                -DgroupId=com.crankuptheamps \
-                -DartifactId=amps-client \
-                -Dversion=5.3.4.0 \
-                -Dpackaging=jar \
-                -DgeneratePom=true
-
-            All business logic uses the AmpsClientPort interface — only the
-            adapter classes (adapter/amps/**) directly import AMPS classes.
-            Tests use MockAmpsClient and do NOT require the JAR on the classpath.
-            ═══════════════════════════════════════════════════════════════════
-        -->
         <dependency>
             <groupId>com.crankuptheamps</groupId>
             <artifactId>amps-client</artifactId>
-           <!-- <version>5.3.4.0</version>-->
             <version>5.3.5.0</version>
-
         </dependency>
 
     </dependencies>

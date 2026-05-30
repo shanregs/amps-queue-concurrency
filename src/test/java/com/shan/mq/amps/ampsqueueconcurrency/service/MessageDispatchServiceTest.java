@@ -42,13 +42,14 @@ class MessageDispatchServiceTest {
         when(processor.process(msg)).thenReturn(ProcessingResult.OK);
 
         CountDownLatch done = new CountDownLatch(1);
-        doAnswer(inv -> { done.countDown(); return null; }).when(haClient).ack(msg);
+        doAnswer(inv -> { done.countDown(); return null; }).when(msg).ack();
 
         Semaphore sem = new Semaphore(5, true);
         dispatchService.dispatch(msg, haClient, sem);
 
         assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
-        verify(haClient).ack(msg);
+        Thread.sleep(50);  // ack() fires before semaphore.release() in VT finally block
+        verify(msg).ack();
         assertThat(sem.availablePermits()).isEqualTo(5);  // permit released
     }
 
@@ -60,13 +61,13 @@ class MessageDispatchServiceTest {
         when(processor.process(msg)).thenReturn(ProcessingResult.DUPLICATE);
 
         CountDownLatch done = new CountDownLatch(1);
-        doAnswer(inv -> { done.countDown(); return null; }).when(haClient).ack(msg);
+        doAnswer(inv -> { done.countDown(); return null; }).when(msg).ack();
 
         Semaphore sem = new Semaphore(5, true);
         dispatchService.dispatch(msg, haClient, sem);
 
         assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
-        verify(haClient).ack(msg);
+        verify(msg).ack();
     }
 
     // ── ACK on DISCARD ────────────────────────────────────────────────────────
@@ -77,13 +78,13 @@ class MessageDispatchServiceTest {
         when(processor.process(msg)).thenReturn(ProcessingResult.DISCARD);
 
         CountDownLatch done = new CountDownLatch(1);
-        doAnswer(inv -> { done.countDown(); return null; }).when(haClient).ack(msg);
+        doAnswer(inv -> { done.countDown(); return null; }).when(msg).ack();
 
         Semaphore sem = new Semaphore(5, true);
         dispatchService.dispatch(msg, haClient, sem);
 
         assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
-        verify(haClient).ack(msg);
+        verify(msg).ack();
     }
 
     // ── No ACK on FAIL ────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ class MessageDispatchServiceTest {
 
         assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
         Thread.sleep(50);  // allow VT finally block to run
-        verify(haClient, never()).ack(any());
+        verify(msg, never()).ack();
         assertThat(sem.availablePermits()).isEqualTo(5);  // permit still released
     }
 
@@ -116,7 +117,7 @@ class MessageDispatchServiceTest {
         Message msg = message("bm-5");
         CountDownLatch done = new CountDownLatch(1);
         when(processor.process(msg)).thenAnswer(inv -> { done.countDown(); return ProcessingResult.OK; });
-        doNothing().when(haClient).ack(any());
+        doNothing().when(msg).ack();
 
         Semaphore sem = new Semaphore(3, true);
         assertThat(sem.availablePermits()).isEqualTo(3);
@@ -146,7 +147,80 @@ class MessageDispatchServiceTest {
         assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
         Thread.sleep(50);
         assertThat(sem.availablePermits()).isEqualTo(5);
-        verify(haClient, never()).ack(any());
+        verify(msg, never()).ack();
+    }
+
+    // ── Concurrent dispatch ───────────────────────────────────────────────────
+
+    @Test
+    void dispatch_multipleConcurrentMessages_allAcked_permitsFullyRestored() throws Exception {
+        int count = 5;
+        CountDownLatch allAcked = new CountDownLatch(count);
+        Semaphore sem = new Semaphore(count, true);
+
+        for (int i = 0; i < count; i++) {
+            Message msg = message("bm-conc-" + i);
+            when(processor.process(msg)).thenReturn(ProcessingResult.OK);
+            doAnswer(inv -> { allAcked.countDown(); return null; }).when(msg).ack();
+            dispatchService.dispatch(msg, haClient, sem);
+        }
+
+        assertThat(allAcked.await(3, TimeUnit.SECONDS)).isTrue();
+        Thread.sleep(50);
+        assertThat(sem.availablePermits()).isEqualTo(count);
+    }
+
+    @Test
+    void dispatch_mixedResults_onlyNonFailMessagesAcked_allPermitsRestored() throws Exception {
+        Message okMsg   = message("bm-mix-1");
+        Message failMsg = message("bm-mix-2");
+        Message dupMsg  = message("bm-mix-3");
+
+        CountDownLatch allDone = new CountDownLatch(3);
+        when(processor.process(okMsg)).thenAnswer(inv -> { allDone.countDown(); return ProcessingResult.OK; });
+        when(processor.process(failMsg)).thenAnswer(inv -> { allDone.countDown(); return ProcessingResult.FAIL; });
+        when(processor.process(dupMsg)).thenAnswer(inv -> { allDone.countDown(); return ProcessingResult.DUPLICATE; });
+        doNothing().when(okMsg).ack();
+        doNothing().when(dupMsg).ack();
+
+        Semaphore sem = new Semaphore(10, true);
+        dispatchService.dispatch(okMsg,   haClient, sem);
+        dispatchService.dispatch(failMsg, haClient, sem);
+        dispatchService.dispatch(dupMsg,  haClient, sem);
+
+        assertThat(allDone.await(3, TimeUnit.SECONDS)).isTrue();
+        Thread.sleep(50);
+        verify(okMsg).ack();
+        verify(dupMsg).ack();
+        verify(failMsg, never()).ack();
+        assertThat(sem.availablePermits()).isEqualTo(10); // all permits returned regardless of result
+    }
+
+    @Test
+    void dispatch_semaphoreAcquiredSynchronously_beforeVirtualThreadStarts() throws Exception {
+        Semaphore sem = new Semaphore(1, true);
+        CountDownLatch processorStarted  = new CountDownLatch(1);
+        CountDownLatch releaseProcessor  = new CountDownLatch(1);
+
+        Message msg = message("bm-sync-1");
+        when(processor.process(msg)).thenAnswer(inv -> {
+            processorStarted.countDown();
+            releaseProcessor.await();
+            return ProcessingResult.OK;
+        });
+        doNothing().when(msg).ack();
+
+        // dispatch() acquires the semaphore in the caller thread, then submits the VT
+        dispatchService.dispatch(msg, haClient, sem);
+
+        // Permit must be taken synchronously — before the VT even starts
+        assertThat(sem.availablePermits()).isEqualTo(0);
+
+        // Let VT finish and release the permit
+        assertThat(processorStarted.await(2, TimeUnit.SECONDS)).isTrue();
+        releaseProcessor.countDown();
+        Thread.sleep(100);
+        assertThat(sem.availablePermits()).isEqualTo(1);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

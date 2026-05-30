@@ -26,6 +26,7 @@ amps:
     subscriber-count: 2
     max-concurrency-per-subscriber: 5
     max-retries: 3
+    retry-db-tracking-enabled: true
     shutdown-timeout-ms: 5000
   publisher:
     topic: /queue/test-trades

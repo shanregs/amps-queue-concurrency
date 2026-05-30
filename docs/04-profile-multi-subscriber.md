@@ -114,7 +114,7 @@ spring:
 
 amps:
   server:
-    uri: tcp://localhost:9004/amps/json
+    uri: tcp://172.21.12.69:9004/amps/json
   queue:
     topic: /queue/trades
     filter: ""

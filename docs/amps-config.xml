@@ -46,6 +46,11 @@
 
     <!-- ── Transports ─────────────────────────────────────────────────────── -->
     <Transports>
+        <!--
+          Primary client transport.
+          Spring Boot HAClient connects via:  tcp://172.21.12.69:9007/amps/json
+          MessageType json → payload parsed as JSON; /id key extraction works.
+        -->
         <Transport>
             <Name>tcp-json</Name>
             <Type>tcp</Type>
@@ -54,6 +59,7 @@
             <MessageType>json</MessageType>
         </Transport>
 
+        <!-- WebSocket transport for browser / SQL clients -->
         <Transport>
             <Name>websocket-any</Name>
             <Protocol>websocket</Protocol>
@@ -63,8 +69,14 @@
     </Transports>
 
     <!-- ── SOW — backing state-of-the-world topics ────────────────────────── -->
+    <!--
+      Each queue requires an underlying SOW topic that stores the current state.
+      Key=/id maps to the "id" field in every JSON payload produced by
+      MessagePayloadFactory (TRADE, ORDER, RISK, CUSTOM templates).
+    -->
     <SOW>
 
+        <!-- ── /queue/trades backing store ──────────────────────────────── -->
         <Topic>
             <Name>trades</Name>
             <MessageType>json</MessageType>
@@ -72,6 +84,16 @@
             <FileName>/home/shan/AMPS/sow/trades.sow</FileName>
         </Topic>
 
+        <!--
+          /queue/trades — primary queue consumed by all subscriber profiles.
+
+          LeaseTimeout  5 000 ms — matches amps.queue.lease-timeout-ms.
+            Rule: set to ≥ (maxRetries + 1) × avg_processing_ms × 2.
+            Default maxRetries = 3, avg < 50 ms → 5 000 ms is safe.
+
+          MaxBacklog  1 000 000 — hard back-pressure ceiling.
+            Producers are slowed when queue depth exceeds this value.
+        -->
         <Queue>
             <Name>/queue/trades</Name>
             <MessageType>json</MessageType>
@@ -81,6 +103,11 @@
             <MaxBacklog>1000000</MaxBacklog>
         </Queue>
 
+        <!-- ── /queue/orders backing store ──────────────────────────────── -->
+        <!--
+          ORDER payloads: orderId, clientId, symbol, type, price, quantity, status.
+          Lower volume than trades → smaller MaxBacklog.
+        -->
         <Topic>
             <Name>orders</Name>
             <MessageType>json</MessageType>
@@ -97,6 +124,11 @@
             <MaxBacklog>500000</MaxBacklog>
         </Queue>
 
+        <!-- ── /queue/risk backing store ─────────────────────────────────── -->
+        <!--
+          RISK payloads: portfolioId, exposure, var95, pnl.
+          Lower frequency; larger per-message payload → moderate backlog.
+        -->
         <Topic>
             <Name>risk</Name>
             <MessageType>json</MessageType>
@@ -113,6 +145,11 @@
             <MaxBacklog>250000</MaxBacklog>
         </Queue>
 
+        <!-- ── /queue/test-trades backing store (test profile only) ──────── -->
+        <!--
+          Used by application-test.yaml; short lease and tiny backlog.
+          Not expected in production — safe to omit on prod servers.
+        -->
         <Topic>
             <Name>test-trades</Name>
             <MessageType>json</MessageType>
@@ -132,35 +169,74 @@
     </SOW>
 
     <!-- ── TransactionLog — journal for durability ────────────────────────── -->
+    <!--
+      All SOW topics and their queue overlays are journalled so that
+      messages survive an AMPS restart (messages in flight are re-delivered).
+      JournalSize: maximum size of a single journal segment file before rotation.
+    -->
     <TransactionLog>
         <JournalDirectory>/home/shan/AMPS/journal</JournalDirectory>
         <JournalSize>1GB</JournalSize>
 
-        <Topic><Name>trades</Name><MessageType>json</MessageType></Topic>
-        <Topic><Name>/queue/trades</Name><MessageType>json</MessageType></Topic>
+        <!-- trades -->
+        <Topic>
+            <Name>trades</Name>
+            <MessageType>json</MessageType>
+        </Topic>
+        <Topic>
+            <Name>/queue/trades</Name>
+            <MessageType>json</MessageType>
+        </Topic>
 
-        <Topic><Name>orders</Name><MessageType>json</MessageType></Topic>
-        <Topic><Name>/queue/orders</Name><MessageType>json</MessageType></Topic>
+        <!-- orders -->
+        <Topic>
+            <Name>orders</Name>
+            <MessageType>json</MessageType>
+        </Topic>
+        <Topic>
+            <Name>/queue/orders</Name>
+            <MessageType>json</MessageType>
+        </Topic>
 
-        <Topic><Name>risk</Name><MessageType>json</MessageType></Topic>
-        <Topic><Name>/queue/risk</Name><MessageType>json</MessageType></Topic>
+        <!-- risk -->
+        <Topic>
+            <Name>risk</Name>
+            <MessageType>json</MessageType>
+        </Topic>
+        <Topic>
+            <Name>/queue/risk</Name>
+            <MessageType>json</MessageType>
+        </Topic>
 
-        <Topic><Name>test-trades</Name><MessageType>json</MessageType></Topic>
-        <Topic><Name>/queue/test-trades</Name><MessageType>json</MessageType></Topic>
+        <!-- test-trades (include so test runs also survive restarts in dev) -->
+        <Topic>
+            <Name>test-trades</Name>
+            <MessageType>json</MessageType>
+        </Topic>
+        <Topic>
+            <Name>/queue/test-trades</Name>
+            <MessageType>json</MessageType>
+        </Topic>
 
     </TransactionLog>
 
     <!-- ── Actions ────────────────────────────────────────────────────────── -->
     <Actions>
 
+        <!-- Prune journal files older than 7 days on every startup -->
         <Action>
-            <On><Module>amps-action-on-startup</Module></On>
+            <On>
+                <Module>amps-action-on-startup</Module>
+            </On>
             <Do>
                 <Module>amps-action-do-remove-journal</Module>
-                <Options><Age>7d</Age></Options>
+                <Options>
+                    <Age>7d</Age>
+                </Options>
             </Do>
         </Action>
 
+        <!-- Emergency shutdown when disk usage exceeds 95 % -->
         <Action>
             <On>
                 <Module>amps-action-on-schedule</Module>
@@ -178,9 +254,13 @@
             </If>
             <Do>
                 <Module>amps-action-do-echo-message</Module>
-                <Options><Message>CRITICAL: Shutting down AMPS due to lack of disk space</Message></Options>
+                <Options>
+                    <Message>CRITICAL: Shutting down AMPS due to lack of disk space</Message>
+                </Options>
             </Do>
-            <Do><Module>amps-action-do-shutdown</Module></Do>
+            <Do>
+                <Module>amps-action-do-shutdown</Module>
+            </Do>
         </Action>
 
     </Actions>

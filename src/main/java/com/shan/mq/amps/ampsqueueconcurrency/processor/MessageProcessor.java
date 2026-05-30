@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.net.InetAddress;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -26,14 +27,25 @@ public class MessageProcessor {
     @Value("${amps.consumer.max-retries:3}")
     private int maxRetries;
 
+    // When false: retries are tracked in-memory only; no FAILED rows written to DB.
+    // In both modes, exhausted retries → log ERROR + DISCARD (ACK, move to next message).
+    // Keep true for multi-jvm-subscriber: in-memory counters don't survive restarts or cross-node re-delivery.
+    @Value("${amps.consumer.retry-db-tracking-enabled:true}")
+    private boolean dbTrackingEnabled;
+
+    // Used only when dbTrackingEnabled=false.
+    // Key: messageId, value: failed attempt count in this JVM instance.
+    // Entry is removed on success or final discard.
+    private final ConcurrentHashMap<String, Integer> inMemoryRetryCount = new ConcurrentHashMap<>();
+
     private static final String HOSTNAME = resolveHostname();
 
     /**
      * Core processing entry point called from a virtual thread per message.
      *
-     * OK        — new message processed successfully → caller ACKs
+     * OK        — message processed successfully → caller ACKs
      * DUPLICATE — already in DB (PROCESSED or DISCARDED) → caller ACKs
-     * DISCARD   — maxRetries exceeded → caller ACKs with SEVERE log
+     * DISCARD   — retries exhausted → caller ACKs, logs ERROR
      * FAIL      — transient failure → caller does NOT ACK; AMPS re-delivers after lease TTL
      */
     @Transactional
@@ -43,15 +55,23 @@ public class MessageProcessor {
         String payload   = message.getData();
         Instant now      = Instant.now();
 
-        Optional<ProcessedMessage> existing = repository.findByMessageId(messageId);
+        return dbTrackingEnabled
+                ? processWithDbTracking(messageId, topic, payload, now)
+                : processWithoutDbTracking(messageId, topic, payload, now);
+    }
 
+    // ── DB-tracked path (retry-db-tracking-enabled=true) ─────────────────────
+    // FAILED rows are written to DB; retry count and last error are persisted.
+    // Safe for multi-jvm deployments.
+
+    private ProcessingResult processWithDbTracking(String messageId, String topic,
+                                                    String payload, Instant now) {
+        Optional<ProcessedMessage> existing = repository.findByMessageId(messageId);
         if (existing.isPresent()) {
             return handleExisting(existing.get(), payload, now);
         }
         return handleFirstDelivery(messageId, topic, payload, now);
     }
-
-    // ── First delivery ────────────────────────────────────────────────────────
 
     private ProcessingResult handleFirstDelivery(String messageId, String topic,
                                                   String payload, Instant now) {
@@ -84,8 +104,6 @@ public class MessageProcessor {
         }
     }
 
-    // ── Retry path ────────────────────────────────────────────────────────────
-
     private ProcessingResult handleExisting(ProcessedMessage pm, String payload, Instant now) {
         ProcessingStatus status = pm.getStatus();
 
@@ -117,13 +135,63 @@ public class MessageProcessor {
             if (newRetryCount >= maxRetries) {
                 pm.setStatus(ProcessingStatus.DISCARDED);
                 repository.save(pm);
-                log.error("DISCARD after {} retries messageId={}", newRetryCount, pm.getMessageId());
+                log.error("DISCARD messageId={} after {} retries — moving to next message",
+                        pm.getMessageId(), newRetryCount);
                 return ProcessingResult.DISCARD;
             }
 
             pm.setStatus(ProcessingStatus.FAILED);
             repository.save(pm);
             log.warn("FAIL retry={} messageId={} error={}", newRetryCount, pm.getMessageId(), e.getMessage());
+            return ProcessingResult.FAIL;
+        }
+    }
+
+    // ── In-memory retry path (retry-db-tracking-enabled=false) ───────────────
+    // No FAILED rows written to DB; retry count lives in inMemoryRetryCount.
+    // PROCESSED rows are still written for idempotency.
+    // Not safe for multi-jvm: counter resets on JVM restart or cross-node re-delivery.
+
+    private ProcessingResult processWithoutDbTracking(String messageId, String topic,
+                                                       String payload, Instant now) {
+        Optional<ProcessedMessage> existing = repository.findByMessageId(messageId);
+        if (existing.isPresent()) {
+            log.debug("DUPLICATE messageId={} status={}", messageId, existing.get().getStatus());
+            return ProcessingResult.DUPLICATE;
+        }
+
+        int attempt = inMemoryRetryCount.merge(messageId, 1, Integer::sum);
+        try {
+            executeBusinessLogic(payload);
+
+            inMemoryRetryCount.remove(messageId);
+            repository.save(ProcessedMessage.builder()
+                    .messageId(messageId)
+                    .topic(topic)
+                    .payload(payload)
+                    .status(ProcessingStatus.PROCESSED)
+                    .receivedAt(now)
+                    .processedAt(now)
+                    .lastAttemptAt(now)
+                    .processedBy(HOSTNAME)
+                    .build());
+
+            log.info("OK attempt={} messageId={} topic={}", attempt, messageId, topic);
+            return ProcessingResult.OK;
+
+        } catch (DataIntegrityViolationException e) {
+            inMemoryRetryCount.remove(messageId);
+            log.debug("DUPLICATE (concurrent insert) messageId={}", messageId);
+            return ProcessingResult.DUPLICATE;
+
+        } catch (Exception e) {
+            if (attempt >= maxRetries) {
+                inMemoryRetryCount.remove(messageId);
+                log.error("DISCARD messageId={} after {} attempts — moving to next message: {}",
+                        messageId, attempt, e.getMessage());
+                return ProcessingResult.DISCARD;
+            }
+            log.warn("FAIL attempt={} messageId={} error={}", attempt, messageId, e.getMessage());
             return ProcessingResult.FAIL;
         }
     }

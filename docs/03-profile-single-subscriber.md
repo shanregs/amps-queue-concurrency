@@ -93,7 +93,7 @@ spring:
 
 amps:
   server:
-    uri: tcp://localhost:9004/amps/json
+    uri: tcp://172.21.12.69:9004/amps/json
   client:
     name: amps-queue-concurrency-sub-1      # fixed name — single subscriber
   queue:

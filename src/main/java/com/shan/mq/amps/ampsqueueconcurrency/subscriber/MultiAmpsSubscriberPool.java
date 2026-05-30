@@ -1,10 +1,16 @@
 package com.shan.mq.amps.ampsqueueconcurrency.subscriber;
 
+import com.crankuptheamps.client.CommandId;
+import com.crankuptheamps.client.Message;
 import com.shan.mq.amps.ampsqueueconcurrency.model.SubscriberContext;
 import com.shan.mq.amps.ampsqueueconcurrency.service.MessageDispatchService;
 import lombok.RequiredArgsConstructor;
-import lombok.Value;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
+import org.springframework.context.SmartLifecycle;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
 
 
 import java.util.ArrayList;

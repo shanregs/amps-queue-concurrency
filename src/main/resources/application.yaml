@@ -35,11 +35,15 @@ management:
 
 amps:
   server:
-    uri: tcp://localhost:9004/amps/json
+    uri: tcp://172.21.12.69:9007/amps/json   # external AMPS server; override with AMPS_SERVER_URI env var
   queue:
     topic: /queue/trades
     filter: ""
     lease-timeout-ms: 5000
   consumer:
     max-retries: 3
+    retry-db-tracking-enabled: true   # true → persist FAILED/DISCARDED rows + retry count to DB
+                                      # false → track retries in-memory only (no FAILED rows written)
+                                      # In both cases, exhausted retries → log ERROR + discard (ACK)
+                                      # Note: false is NOT safe for multi-jvm-subscriber (restarts reset counters)
     shutdown-timeout-ms: 30000

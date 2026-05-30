@@ -174,7 +174,8 @@ src/main/java/com/shan/mq/amps/ampsqueueconcurrency/
 |---|---|---|
 | Architecture style | Simple layered (no hexagonal) | Lower complexity, clear package boundaries |
 | Retry mechanism | AMPS natural re-delivery (no ACK → lease expiry) | Releases semaphore and DB connection immediately |
-| Dead-letter handling | None — discard after maxRetries | No DLQ infrastructure available |
+| Retry count storage | `retry-db-tracking-enabled` flag (default `true`) | `true` → FAILED rows in DB (survives restarts, multi-JVM safe); `false` → in-memory `ConcurrentHashMap` (no FAILED rows written, JVM-local only) |
+| Dead-letter handling | None — discard after `max-retries` exhausted; log ERROR + ACK | No DLQ infrastructure available |
 | Idempotency key | AMPS bookmark (`message.getBookmark()`) | Globally unique per queue message, built-in |
 | Backpressure | `Semaphore` acquired before `executor.submit()` | Blocks subscriber thread; AMPS pauses delivery naturally |
 | Semaphore scope | Per-subscriber (multi-sub profiles) | One slow subscriber does not starve others |
@@ -203,6 +204,8 @@ src/main/java/com/shan/mq/amps/ampsqueueconcurrency/
 | [`docs/10-publisher-module.md`](docs/10-publisher-module.md) | Publisher design: 4 modes, 4 payload templates, rate limiter, combined profiles |
 | [`docs/11-virtual-threads.md`](docs/11-virtual-threads.md) | VT theory, lifecycle, parking vs blocking, pinning detection and fixes |
 | [`docs/12-infrastructure-docker.md`](docs/12-infrastructure-docker.md) | C4 diagrams (L1/L2/L3), Docker Compose, AMPS setup, Grafana/Loki observability |
+| [`docs/15-smart-lifecycle.md`](docs/15-smart-lifecycle.md) | SmartLifecycle theory, phase ordering, stop callback, patterns, pitfalls, project usage |
+| [`docs/16-rate-limiters.md`](docs/16-rate-limiters.md) | Five rate-limiter algorithms, C4 diagrams, message flows, enterprise use cases, library guide |
 
 ---
 

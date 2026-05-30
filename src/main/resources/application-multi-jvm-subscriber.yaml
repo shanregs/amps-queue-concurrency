@@ -23,3 +23,4 @@ amps:
     subscriber-count: 3
     max-concurrency-per-subscriber: 50
     bookmark-dir: ${user.home}/.amps
+    retry-db-tracking-enabled: true   # must stay true for multi-jvm: in-memory counters don't survive JVM restarts or cross-node re-delivery

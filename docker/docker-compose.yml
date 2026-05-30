@@ -1,23 +1,26 @@
 ##############################################################################
 # AMPS Queue Concurrency — Full Docker Stack
 #
+# AMPS server: external, running at 172.21.12.69:9004 (admin: :8085)
+#              Not containerised — all app services connect directly.
+#
 # Services:
-#   amps          — AMPS message server  (port 9004 client, 8085 admin)
-#   postgres      — Shared DB for multi-JVM profile (port 5432)
-#   app-publisher — Spring Boot: message-publisher profile (port 8082)
-#   app-single    — Spring Boot: single-subscriber profile (port 8080)
-#   app-multi     — Spring Boot: multi-subscriber profile (port 8081)
-#   prometheus    — Metrics scraper (port 9090)
-#   grafana       — Dashboards (port 3000)
-#   loki          — Log aggregation (port 3100)
+#   postgres      — Shared DB for multi-JVM profile (host port 5433)
+#   app-publisher — Spring Boot: message-publisher profile  (port 8082)
+#   app-single    — Spring Boot: single-subscriber profile  (port 8080)
+#   app-multi     — Spring Boot: multi-subscriber profile   (port 8081)
+#   app-multi-jvm — Spring Boot: multi-jvm-subscriber       (port 8083)
+#   prometheus    — Metrics scraper  (port 9090)
+#   grafana       — Dashboards       (port 3000)
+#   loki          — Log aggregation  (port 3100)
 #   promtail      — Log shipper (reads Docker logs → Loki)
 #
-# Quick start:
-#   docker compose -f docker/docker-compose.yml up amps postgres prometheus grafana loki promtail
-#   docker compose -f docker/docker-compose.yml up app-publisher app-single
+# Quick start (publisher + multi-jvm subscriber + full monitoring):
+#   docker compose -f docker/docker-compose.yml up -d \
+#     postgres prometheus grafana loki promtail app-publisher app-multi-jvm
 #
-# Build app image first:
-#   docker compose -f docker/docker-compose.yml build app-single
+# Build app images first:
+#   docker compose -f docker/docker-compose.yml build app-publisher app-multi-jvm
 ##############################################################################
 
 name: amps-queue-concurrency
@@ -26,11 +29,8 @@ x-app-common: &app-common
   build:
     context: ..
     dockerfile: Dockerfile
-  depends_on:
-    amps:
-      condition: service_healthy
   environment:
-    AMPS_SERVER_URI: tcp://amps:9004/amps/json
+    AMPS_SERVER_URI: tcp://172.21.12.69:9007/amps/json
     SPRING_PROFILES_ACTIVE: "docker-logging"   # overridden per service below
   labels:
     logging: "promtail"
@@ -38,32 +38,12 @@ x-app-common: &app-common
 
 services:
 
-  # ── AMPS Server ─────────────────────────────────────────────────────────────
-  amps:
-    image: 60east/amps:latest
-    container_name: amps-server
-    ports:
-      - "9004:9004"    # Client connections (amps:// protocol)
-      - "8085:8085"    # Admin HTTP UI
-    volumes:
-      - ./amps/config.xml:/etc/amps/config.xml:ro
-      - amps-sow:/amps/sow
-      - amps-logs:/amps/logs
-    command: ["/etc/amps/config.xml"]
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9004"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
-    restart: unless-stopped
-
   # ── PostgreSQL (multi-JVM profile) ──────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: amps-postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"   # host 5433 → container 5432 (avoids conflict with local postgres)
     environment:
       POSTGRES_DB:       ampsdb
       POSTGRES_USER:     amps_user
@@ -85,7 +65,7 @@ services:
     ports:
       - "8082:8080"
     environment:
-      AMPS_SERVER_URI: tcp://amps:9004/amps/json
+      AMPS_SERVER_URI: tcp://172.21.12.69:9007/amps/json
       SPRING_PROFILES_ACTIVE: "message-publisher,docker-logging"
       AMPS_PUBLISHER_MESSAGES_PER_SECOND: "500"
       AMPS_PUBLISHER_MODE: "RATE_LIMITED"
@@ -99,9 +79,9 @@ services:
     <<: *app-common
     container_name: amps-single-subscriber
     ports:
-      - "8080:8080"
+      - "8084:8080"   # host 8084 (8080 occupied by wams_keycloak)
     environment:
-      AMPS_SERVER_URI: tcp://amps:9004/amps/json
+      AMPS_SERVER_URI: tcp://172.21.12.69:9007/amps/json
       SPRING_PROFILES_ACTIVE: "single-subscriber,docker-logging"
       AMPS_CONSUMER_MAX_CONCURRENCY: "100"
     volumes:
@@ -117,7 +97,7 @@ services:
     ports:
       - "8081:8080"
     environment:
-      AMPS_SERVER_URI: tcp://amps:9004/amps/json
+      AMPS_SERVER_URI: tcp://172.21.12.69:9007/amps/json
       SPRING_PROFILES_ACTIVE: "multi-subscriber,docker-logging"
       AMPS_CONSUMER_SUBSCRIBER_COUNT: "3"
       AMPS_CONSUMER_MAX_CONCURRENCY_PER_SUBSCRIBER: "50"
@@ -134,12 +114,10 @@ services:
     ports:
       - "8083:8080"
     depends_on:
-      amps:
-        condition: service_healthy
       postgres:
         condition: service_healthy
     environment:
-      AMPS_SERVER_URI:    tcp://amps:9004/amps/json
+      AMPS_SERVER_URI:    tcp://172.21.12.69:9004/amps/json
       SPRING_PROFILES_ACTIVE: "multi-jvm-subscriber,docker-logging"
       DB_HOST:            postgres
       DB_USER:            amps_user
@@ -193,11 +171,12 @@ services:
   loki:
     image: grafana/loki:2.9.5
     container_name: amps-loki
+    user: "0"   # run as root in dev — avoids named-volume permission issues
     ports:
       - "3100:3100"
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
-      - loki-data:/tmp/loki
+      - loki-data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     restart: unless-stopped
 
@@ -215,12 +194,10 @@ services:
 
 # ── Named volumes ─────────────────────────────────────────────────────────────
 volumes:
-  amps-sow:
-  amps-logs:
   postgres-data:
   prometheus-data:
   grafana-data:
-  loki-data:
+  loki-data:   # mounted at /loki inside container
   bookmark-single:
   bookmark-multi:
   bookmark-multi-jvm:
