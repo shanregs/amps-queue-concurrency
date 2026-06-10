@@ -4,6 +4,8 @@ import com.crankuptheamps.client.HAClient;
 import com.crankuptheamps.client.Message;
 import com.shan.mq.amps.ampsqueueconcurrency.model.ProcessingResult;
 import com.shan.mq.amps.ampsqueueconcurrency.processor.MessageProcessor;
+import com.shan.mq.amps.ampsqueueconcurrency.subscriber.SubscriberMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +33,8 @@ class MessageDispatchServiceTest {
     @BeforeEach
     void setUp() {
         executor = Executors.newVirtualThreadPerTaskExecutor();
-        dispatchService = new MessageDispatchService(processor, executor);
+        dispatchService = new MessageDispatchService(
+                processor, executor, new SubscriberMetrics(new SimpleMeterRegistry()));
     }
 
     // ── ACK on OK ─────────────────────────────────────────────────────────────
@@ -48,7 +51,7 @@ class MessageDispatchServiceTest {
         dispatchService.dispatch(msg, haClient, sem);
 
         assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
-        Thread.sleep(50);  // ack() fires before semaphore.release() in VT finally block
+        Thread.sleep(200);  // allow finally block (timer.stop + vtStopped + semaphore.release) to complete
         verify(msg).ack();
         assertThat(sem.availablePermits()).isEqualTo(5);  // permit released
     }
@@ -158,15 +161,20 @@ class MessageDispatchServiceTest {
         CountDownLatch allAcked = new CountDownLatch(count);
         Semaphore sem = new Semaphore(count, true);
 
+        // Register all stubs before dispatching to avoid Mockito strict-stub races
+        // with concurrently running virtual threads.
+        Message[] msgs = new Message[count];
         for (int i = 0; i < count; i++) {
-            Message msg = message("bm-conc-" + i);
-            when(processor.process(msg)).thenReturn(ProcessingResult.OK);
-            doAnswer(inv -> { allAcked.countDown(); return null; }).when(msg).ack();
-            dispatchService.dispatch(msg, haClient, sem);
+            msgs[i] = message("bm-conc-" + i);
+            when(processor.process(msgs[i])).thenReturn(ProcessingResult.OK);
+            doAnswer(inv -> { allAcked.countDown(); return null; }).when(msgs[i]).ack();
+        }
+        for (int i = 0; i < count; i++) {
+            dispatchService.dispatch(msgs[i], haClient, sem);
         }
 
         assertThat(allAcked.await(3, TimeUnit.SECONDS)).isTrue();
-        Thread.sleep(50);
+        Thread.sleep(200);
         assertThat(sem.availablePermits()).isEqualTo(count);
     }
 

@@ -20,12 +20,18 @@ scrape_configs:
     metrics_path: '/actuator/prometheus'
     static_configs:
       - targets:
-          - 'app-single:8080'
-          - 'app-multi:8080'
           - 'app-publisher:8080'
           - 'app-multi-jvm:8080'
+          - 'amps-multi-jvm-sub2:8080'
         labels:
           application: 'amps-queue-concurrency'
+      # Targets below are optional — only UP when those profiles are running
+      - targets:
+          - 'app-single:8080'
+          - 'app-multi:8080'
+        labels:
+          application: 'amps-queue-concurrency'
+          optional: 'true'
 
   # ── AMPS Admin (if prometheus exporter is enabled) ────────────────────────
   # AMPS does not expose Prometheus natively; metrics come via Spring Actuator.

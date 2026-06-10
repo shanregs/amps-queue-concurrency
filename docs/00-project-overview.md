@@ -154,9 +154,15 @@ amps-queue-concurrency/
     ├── 06-cross-cutting-concerns.md
     ├── 07-testing-strategy.md
     ├── 08-capacity-planning.md
+    ├── 09-faq.md
     ├── 10-publisher-module.md
     ├── 11-virtual-threads.md
-    └── 12-infrastructure-docker.md          ← Docker, C4 diagrams, AMPS setup, Grafana/Loki
+    ├── 12-infrastructure-docker.md          ← Docker, C4 diagrams, AMPS setup, Grafana/Loki
+    ├── 13-docker-cheatsheet.md              ← Docker & Compose quick-reference commands
+    ├── 14-observability-cheatsheet.md       ← PromQL, LogQL, Grafana, Loki quick-reference
+    ├── 15-smart-lifecycle.md                ← SmartLifecycle theory, phase ordering, patterns
+    ├── 16-rate-limiters.md                  ← Rate-limiter algorithms, C4 diagrams, library guide
+    └── 17-how-to-run.md                     ← Step-by-step: publisher + multi-JVM (Docker / Terminal / IntelliJ)
 ```
 
 ---
@@ -228,5 +234,12 @@ mvnw.cmd clean package -DskipTests        # Windows
 | [06-cross-cutting-concerns.md](06-cross-cutting-concerns.md) | Idempotency, retry (no DLQ), shutdown, backpressure, observability |
 | [07-testing-strategy.md](07-testing-strategy.md) | Unit + integration test plan, tooling, mock AMPS |
 | [08-capacity-planning.md](08-capacity-planning.md) | Throughput formulas, sizing guide, profile comparison |
+| [09-faq.md](09-faq.md) | Frequently asked questions: design choices, edge cases |
 | [10-publisher-module.md](10-publisher-module.md) | Publisher design: modes, payload templates, rate limiter, combined usage |
 | [11-virtual-threads.md](11-virtual-threads.md) | VT theory, lifecycle, parking vs blocking, pinning (detection + fixes), JDK notes |
+| [12-infrastructure-docker.md](12-infrastructure-docker.md) | C4 diagrams, Docker Compose stack, AMPS setup, PostgreSQL, Grafana/Loki observability |
+| [13-docker-cheatsheet.md](13-docker-cheatsheet.md) | Docker & Compose quick-reference: build, run, logs, exec, volume, network commands |
+| [14-observability-cheatsheet.md](14-observability-cheatsheet.md) | Prometheus PromQL, Grafana dashboards, Loki LogQL, Promtail — quick-reference |
+| [15-smart-lifecycle.md](15-smart-lifecycle.md) | Spring SmartLifecycle theory: phase ordering, stop callback, patterns, pitfalls, project usage |
+| [16-rate-limiters.md](16-rate-limiters.md) | Five rate-limiter algorithms, C4 diagrams, message flows, enterprise use cases, library guide |
+| [17-how-to-run.md](17-how-to-run.md) | **Step-by-step run guide:** publisher + 2 multi-JVM subscribers via Docker, Windows Terminal, IntelliJ |

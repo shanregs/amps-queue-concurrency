@@ -117,7 +117,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      AMPS_SERVER_URI:    tcp://172.21.12.69:9004/amps/json
+      AMPS_SERVER_URI:    tcp://172.21.12.69:9007/amps/json
       SPRING_PROFILES_ACTIVE: "multi-jvm-subscriber,docker-logging"
       DB_HOST:            postgres
       DB_USER:            amps_user

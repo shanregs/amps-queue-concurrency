@@ -204,8 +204,11 @@ src/main/java/com/shan/mq/amps/ampsqueueconcurrency/
 | [`docs/10-publisher-module.md`](docs/10-publisher-module.md) | Publisher design: 4 modes, 4 payload templates, rate limiter, combined profiles |
 | [`docs/11-virtual-threads.md`](docs/11-virtual-threads.md) | VT theory, lifecycle, parking vs blocking, pinning detection and fixes |
 | [`docs/12-infrastructure-docker.md`](docs/12-infrastructure-docker.md) | C4 diagrams (L1/L2/L3), Docker Compose, AMPS setup, Grafana/Loki observability |
+| [`docs/13-docker-cheatsheet.md`](docs/13-docker-cheatsheet.md) | Docker & Compose quick-reference: build, run, logs, exec, volume, network commands |
+| [`docs/14-observability-cheatsheet.md`](docs/14-observability-cheatsheet.md) | Prometheus PromQL, Grafana dashboards, Loki LogQL, Promtail — quick-reference |
 | [`docs/15-smart-lifecycle.md`](docs/15-smart-lifecycle.md) | SmartLifecycle theory, phase ordering, stop callback, patterns, pitfalls, project usage |
 | [`docs/16-rate-limiters.md`](docs/16-rate-limiters.md) | Five rate-limiter algorithms, C4 diagrams, message flows, enterprise use cases, library guide |
+| [`docs/17-how-to-run.md`](docs/17-how-to-run.md) | Step-by-step run guide: publisher + 2 multi-JVM subscribers via Docker, Windows Terminal, IntelliJ |
 
 ---
 

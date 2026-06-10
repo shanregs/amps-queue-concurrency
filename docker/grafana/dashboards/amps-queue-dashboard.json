@@ -2,13 +2,17 @@
   "title": "AMPS Queue Concurrency",
   "uid": "amps-queue-main",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": { "from": "now-30m", "to": "now" },
   "panels": [
+
+    { "id": 20, "type": "row", "title": "Publisher", "collapsed": false,
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 } },
+
     {
-      "id": 1, "type": "stat", "title": "Messages Processed (total)",
-      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "id": 1, "type": "stat", "title": "Messages Published (total)",
+      "gridPos": { "x": 0, "y": 1, "w": 4, "h": 4 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "sum(amps_publisher_messages_published_total)",
@@ -18,7 +22,7 @@
     },
     {
       "id": 2, "type": "stat", "title": "Publish Errors",
-      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "gridPos": { "x": 4, "y": 1, "w": 4, "h": 4 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "sum(amps_publisher_messages_errors_total)",
@@ -28,7 +32,7 @@
     },
     {
       "id": 3, "type": "stat", "title": "Active Publisher Workers",
-      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "gridPos": { "x": 8, "y": 1, "w": 4, "h": 4 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "amps_publisher_active_workers",
@@ -37,7 +41,7 @@
     },
     {
       "id": 4, "type": "timeseries", "title": "Publish Rate (msg/s)",
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "rate(amps_publisher_messages_published_total[30s])",
@@ -51,7 +55,7 @@
     },
     {
       "id": 5, "type": "timeseries", "title": "Publish Latency (p50/p95/p99)",
-      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "histogram_quantile(0.50, rate(amps_publisher_publish_duration_seconds_bucket[1m]))",
@@ -67,28 +71,96 @@
       }],
       "fieldConfig": { "defaults": { "unit": "s" } }
     },
+
+    { "id": 21, "type": "row", "title": "Subscribers (all JVMs)", "collapsed": false,
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 1 } },
+
+    {
+      "id": 9, "type": "timeseries", "title": "Messages Consumed/s by Result",
+      "description": "Rate of processed messages per JVM broken down by result. Each line = one subscriber JVM + result.",
+      "gridPos": { "x": 0, "y": 14, "w": 16, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (instance, result) (rate(amps_subscriber_messages_total[30s]))",
+        "legendFormat": "{{instance}} {{result}}"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Active VT Workers per JVM",
+      "description": "Virtual threads currently inside MessageProcessor.process(). Saturated = semaphore is blocking the subscriber thread.",
+      "gridPos": { "x": 16, "y": 14, "w": 8, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "amps_subscriber_active_vt_workers",
+        "legendFormat": "{{instance}}"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 } }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Processing Duration p50/p95/p99",
+      "description": "Time spent inside MessageProcessor.process() per virtual thread.",
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "histogram_quantile(0.50, sum by (instance, le) (rate(amps_subscriber_processing_duration_seconds_bucket[1m])))",
+        "legendFormat": "{{instance}} p50"
+      },{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "histogram_quantile(0.95, sum by (instance, le) (rate(amps_subscriber_processing_duration_seconds_bucket[1m])))",
+        "legendFormat": "{{instance}} p95"
+      },{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "histogram_quantile(0.99, sum by (instance, le) (rate(amps_subscriber_processing_duration_seconds_bucket[1m])))",
+        "legendFormat": "{{instance}} p99"
+      }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "HikariCP — Active DB Connections",
+      "description": "Active connections drawn from the pool per JVM. Should stay well below maximum-pool-size (20).",
+      "gridPos": { "x": 12, "y": 22, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "hikaricp_connections_active",
+        "legendFormat": "{{instance}} active"
+      },{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "hikaricp_connections_pending",
+        "legendFormat": "{{instance}} pending"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 } }
+    },
+
+    { "id": 22, "type": "row", "title": "JVM", "collapsed": false,
+      "gridPos": { "x": 0, "y": 30, "w": 24, "h": 1 } },
+
     {
       "id": 6, "type": "timeseries", "title": "JVM Virtual Threads (live)",
-      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 7 },
+      "gridPos": { "x": 0, "y": 31, "w": 12, "h": 7 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "jvm_threads_live_threads",
-        "legendFormat": "{{application}} live threads"
+        "legendFormat": "{{instance}} live threads"
       }]
     },
     {
       "id": 7, "type": "timeseries", "title": "JVM Heap Used",
-      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 7 },
+      "gridPos": { "x": 12, "y": 31, "w": 12, "h": 7 },
       "targets": [{
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "expr": "jvm_memory_used_bytes{area=\"heap\"}",
-        "legendFormat": "{{application}} heap"
+        "legendFormat": "{{instance}} heap"
       }],
       "fieldConfig": { "defaults": { "unit": "bytes" } }
     },
+
+    { "id": 23, "type": "row", "title": "Logs", "collapsed": false,
+      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 1 } },
+
     {
       "id": 8, "type": "logs", "title": "Application Logs (Loki)",
-      "gridPos": { "x": 0, "y": 19, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 39, "w": 24, "h": 10 },
       "targets": [{
         "datasource": { "type": "loki", "uid": "loki" },
         "expr": "{service=~\"app.*\"} | json | level != \"DEBUG\"",

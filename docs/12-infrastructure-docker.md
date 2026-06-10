@@ -200,7 +200,7 @@ to that IP — no AMPS container is started by this Compose stack.
 
 | Endpoint | Address |
 |---|---|
-| Client TCP (HAClient) | `tcp://172.21.12.69:9004/amps/json` |
+| Client TCP (HAClient) | `tcp://172.21.12.69:9007/amps/json` |
 | Admin HTTP UI | `http://172.21.12.69:8085/amps/admin` |
 
 To switch to a different AMPS host, set the `AMPS_SERVER_URI` environment variable
