@@ -38,6 +38,7 @@ class AmpsMessagePublisherTest {
         ReflectionTestUtils.setField(publisher, "totalMessages",       0L);
         ReflectionTestUtils.setField(publisher, "concurrentPublishers", 1);
         ReflectionTestUtils.setField(publisher, "logProgressEvery",    1000L);
+        ReflectionTestUtils.setField(publisher, "runDuration",         "30m");
     }
 
     @AfterEach
@@ -163,6 +164,35 @@ class AmpsMessagePublisherTest {
 
         publisher.start();
         assertThat(threePublishes.await(3, TimeUnit.SECONDS)).isTrue();
+    }
+
+    // ── Run duration ──────────────────────────────────────────────────────────
+
+    @Test
+    void parseDuration_supportsSecondsMinutesHoursAndBareNumber() {
+        assertThat(AmpsMessagePublisher.parseDurationToSeconds("30s")).isEqualTo(30);
+        assertThat(AmpsMessagePublisher.parseDurationToSeconds("5m")).isEqualTo(300);
+        assertThat(AmpsMessagePublisher.parseDurationToSeconds("2h")).isEqualTo(7200);
+        assertThat(AmpsMessagePublisher.parseDurationToSeconds("30m")).isEqualTo(1800);
+        assertThat(AmpsMessagePublisher.parseDurationToSeconds("120")).isEqualTo(120);
+    }
+
+    @Test
+    void start_autoStopsAfterRunDuration() throws Exception {
+        ReflectionTestUtils.setField(publisher, "runDuration", "2s");
+        Timer timer = timerThatRunsRunnable();
+        when(metrics.publishTimer()).thenReturn(timer);
+        when(payloadFactory.generate(any(), anyLong())).thenReturn("{\"seq\":1}");
+
+        publisher.start();
+        assertThat(publisher.isRunning()).isTrue();
+
+        // Auto-stop fires after 2s; poll for up to 5s
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (publisher.isRunning() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(100);
+        }
+        assertThat(publisher.isRunning()).isFalse();
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

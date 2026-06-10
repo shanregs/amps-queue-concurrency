@@ -446,6 +446,9 @@ amps:
     # ── Observability ───────────────────────────────────────────────────
     log-progress-every: 1000         # log "Published N messages" every N msgs
 
+    # ── Run duration ────────────────────────────────────────────────────────────
+    run-duration: 30m               # auto-stop after elapsed time: 30s | 5m | 2h (default: 30m)
+
 management:
   endpoints:
     web:
@@ -548,7 +551,39 @@ One JVM:
 
 ---
 
-### Scenario 5 — Custom payload with RISK template
+### Scenario 5 — Time-bounded run (auto-stop after N minutes)
+
+```yaml
+amps:
+  publisher:
+    mode: RATE_LIMITED
+    messages-per-second: 500
+    run-duration: 10m              # publisher auto-stops after 10 minutes
+```
+
+```bash
+mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=message-publisher
+# Publisher starts, runs for exactly 10 minutes, then stops automatically
+```
+
+Override at runtime without changing YAML:
+
+```powershell
+# Docker
+$env:AMPS_PUBLISHER_RUN_DURATION = "5m"
+docker compose -f docker/docker-compose.yml up -d app-publisher
+
+# Windows Terminal
+$env:AMPS_PUBLISHER_RUN_DURATION = "5m"
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=message-publisher"
+```
+
+> Works with all modes. If `FIXED_COUNT` total is also set, whichever limit fires
+> first (count or time) stops the publisher.
+
+---
+
+### Scenario 6 — Custom payload with RISK template
 
 ```yaml
 amps:
@@ -722,3 +757,4 @@ AmpsMessagePublisherTest (Mockito):
 | Phase = MAX_VALUE - 1 | Publisher stops before subscriber when combined | Avoids pushing new messages while subscriber is draining shutdown |
 | FIXED_COUNT completion triggers `context.close()` | Yes | Allows clean JVM exit in automated test pipelines without SIGTERM |
 | Publisher does NOT retry on publish failure | Log + continue | Simulation doesn't need at-least-once guarantees |
+| Publisher run-duration | `ScheduledExecutorService` fires `stop()` after elapsed time (default `30m`) | Orthogonal to FIXED_COUNT — count limit and time limit work independently; whichever fires first wins |

@@ -185,6 +185,7 @@ src/main/java/com/shan/mq/amps/ampsqueueconcurrency/
 | Publisher DB | None in standalone mode | Publisher is stateless; excludes JPA auto-config |
 | Publisher phase | `MAX_VALUE - 1` | Stops before subscriber when profiles combined; subscriber drains queue first |
 | Publisher rate limiting | Token-bucket (`Semaphore` + `ScheduledExecutorService`) | Accurate aggregate rate across N VTs; 100ms replenishment granularity |
+| Publisher run-duration | `ScheduledExecutorService` fires `stop()` after elapsed time (default `30m`) | Orthogonal to FIXED_COUNT — count limit and time limit work independently; whichever fires first wins |
 
 ---
 

@@ -98,8 +98,10 @@ docker compose -f docker/docker-compose.yml ps
 
 **Check startup logs:**
 ```powershell
-# Publisher — look for: "AmpsMessagePublisher started: workers=5 topic=/queue/trades mode=RATE_LIMITED"
+# Publisher — look for: "AmpsMessagePublisher started: workers=5 topic=/queue/trades mode=RATE_LIMITED runDuration=30m"
 docker compose -f docker/docker-compose.yml logs app-publisher --tail=10
+# To override run-duration, set AMPS_PUBLISHER_RUN_DURATION before the compose command:
+#   $env:AMPS_PUBLISHER_RUN_DURATION = "5m"; docker compose ... up -d app-publisher
 
 # Subscriber JVM 1 — look for: "MultiAmpsSubscriberPool : Starting 3 AMPS subscribers"
 docker compose -f docker/docker-compose.yml logs app-multi-jvm --tail=10
@@ -212,7 +214,8 @@ Use **Ctrl+Shift+T** to open three tabs. Run one command per tab, in order.
 **Tab 1 — Publisher (port 8082)**
 
 ```powershell
-$env:AMPS_SERVER_URI = "tcp://172.21.12.69:9007/amps/json"
+$env:AMPS_SERVER_URI             = "tcp://172.21.12.69:9007/amps/json"
+$env:AMPS_PUBLISHER_RUN_DURATION = "30m"   # optional: 30s | 5m | 2h
 
 .\mvnw.cmd spring-boot:run `
   "-Dspring-boot.run.profiles=message-publisher" `
@@ -287,7 +290,7 @@ docker compose -f docker/docker-compose.yml up -d postgres
    | Main class            | `AmpsQueueConcurrencyApplication`            |
    | Active profiles       | `message-publisher`                          |
    | VM options            | `-Dserver.port=8082`                         |
-   | Environment variables | `AMPS_SERVER_URI=tcp://172.21.12.69:9007/amps/json` |
+   | Environment variables | `AMPS_SERVER_URI=tcp://172.21.12.69:9007/amps/json;AMPS_PUBLISHER_RUN_DURATION=30m` |
 
 2. Click **OK**.
 

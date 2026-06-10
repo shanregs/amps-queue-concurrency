@@ -35,3 +35,4 @@ amps:
       - JPM
     rate-replenish-interval-ms: 100
     log-progress-every: 1000
+    run-duration: 30m         # auto-stop after this time; format: 30s | 5m | 2h

@@ -70,6 +70,7 @@ services:
       AMPS_PUBLISHER_MESSAGES_PER_SECOND: "500"
       AMPS_PUBLISHER_MODE: "RATE_LIMITED"
       AMPS_PUBLISHER_CONCURRENT_PUBLISHERS: "5"
+      AMPS_PUBLISHER_RUN_DURATION: ${AMPS_PUBLISHER_RUN_DURATION:-30m}
     labels:
       logging: "promtail"
       spring_profile: "message-publisher"
